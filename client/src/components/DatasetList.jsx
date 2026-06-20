@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react'
 import './DatasetList.css'
 
-export default function DatasetList({ username, refreshKey, onLoad, onNew }) {
+export default function DatasetList({ token, refreshKey, onLoad, onNew }) {
   const [datasets, setDatasets] = useState([])
 
   useEffect(() => {
-    fetch(`/api/datasets?username=${encodeURIComponent(username)}`)
+    fetch('/api/datasets', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => Array.isArray(data) ? setDatasets(data) : [])
       .catch(() => {})
-  }, [username, refreshKey])
+  }, [token, refreshKey])
 
   async function handleLoad(id) {
     const res = await fetch(`/api/datasets/${id}`)
@@ -18,7 +18,7 @@ export default function DatasetList({ username, refreshKey, onLoad, onNew }) {
   }
 
   async function handleDelete(id) {
-    await fetch(`/api/datasets/${id}`, { method: 'DELETE' })
+    await fetch(`/api/datasets/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } })
     setDatasets(prev => prev.filter(d => d.id !== id))
   }
 

@@ -24,8 +24,8 @@ function App() {
   async function handleSave({ name, headers, rows, context }) {
     await fetch('/api/datasets', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: user.username, name, headers, rows, context }),
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${user.token}` },
+      body: JSON.stringify({ name, headers, rows, context }),
     })
     setRefreshKey(k => k + 1)
   }
@@ -67,7 +67,7 @@ function App() {
       <div className="app-body">
         {!user.isGuest && showDatasets && (
           <DatasetList
-            username={user.username}
+            token={user.token}
             refreshKey={refreshKey}
             onLoad={handleLoad}
             onNew={handleNew}

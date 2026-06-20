@@ -47,7 +47,7 @@ export default function Auth({ onAuth }) {
         setError(data.error || 'Something went wrong')
         return
       }
-      onAuth({ username: data.username, isGuest: false })
+      onAuth({ username: data.username, token: data.access_token, isGuest: false })
     } catch {
       setError('Could not reach server')
     } finally {

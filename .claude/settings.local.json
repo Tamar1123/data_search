@@ -13,7 +13,8 @@
       "Bash(curl -s \"http://localhost:5000/api/datasets?username=testuser\")",
       "Bash(curl -s -w '\\\\nHTTP %{http_code}' -X POST http://localhost:5000/api/auth/register -H 'Content-Type: application/json' -d '{\"username\":\"newuser\",\"password\":\"Pass1234!\"}')",
       "Bash(lsof -ti:5000)",
-      "Bash(xargs kill -9)"
+      "Bash(xargs kill -9)",
+      "Bash(pip show *)"
     ]
   }
 }

@@ -6,6 +6,7 @@ import json
 import sqlite3
 from datetime import datetime
 from flask import Flask, request, jsonify, g
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -13,6 +14,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "dev-secret-change-in-production")
+JWTManager(app)
+
 _SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(_SERVER_DIR, "data", "data.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -21,7 +25,7 @@ os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 @app.after_request
 def add_cors(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
     return response
 
@@ -129,7 +133,7 @@ def register():
         (username, generate_password_hash(password)),
     )
     db.commit()
-    return jsonify({"username": username}), 201
+    return jsonify({"username": username, "access_token": create_access_token(identity=username)}), 201
 
 
 @app.post("/api/auth/login")
@@ -143,13 +147,14 @@ def login():
     user = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
     if not user or not check_password_hash(user["password_hash"], password):
         return jsonify({"error": "Invalid username or password"}), 401
-    return jsonify({"username": username})
+    return jsonify({"username": username, "access_token": create_access_token(identity=username)})
 
 
 @app.post("/api/datasets")
+@jwt_required()
 def save_dataset():
     data = request.get_json(silent=True) or {}
-    username = (data.get("username") or "").strip()
+    username = get_jwt_identity()
     name = (data.get("name") or "Untitled").strip()
     headers = data.get("headers", [])
     rows = data.get("rows", [])
@@ -176,10 +181,9 @@ def save_dataset():
 
 
 @app.get("/api/datasets")
+@jwt_required()
 def list_datasets():
-    username = (request.args.get("username") or "").strip()
-    if not username:
-        return jsonify({"error": "username is required"}), 400
+    username = get_jwt_identity()
     rows = get_db().execute(
         "SELECT id, name, created_at FROM datasets WHERE username = ? ORDER BY created_at DESC",
         (username,),
@@ -200,6 +204,7 @@ def get_dataset(dataset_id):
 
 
 @app.delete("/api/datasets/<int:dataset_id>")
+@jwt_required()
 def delete_dataset(dataset_id):
     db = get_db()
     db.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
