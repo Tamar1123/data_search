@@ -203,7 +203,6 @@ export default function Table({
         name: tableName,
         headers: data.columns.map(c => [c, 'string']),
         rows: data.rows,
-        context: { summary: '' },
       })
       setSaved(true)
     } catch (err) {

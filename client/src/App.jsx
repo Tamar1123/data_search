@@ -21,11 +21,11 @@ function App() {
     setShowDatasets(false)
   }
 
-  async function handleSave({ name, headers, rows, context }) {
+  async function handleSave({ name, headers, rows }) {
     await fetch('/api/datasets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${user.token}` },
-      body: JSON.stringify({ name, headers, rows, context }),
+      body: JSON.stringify({ name, headers, rows }),
     })
     setRefreshKey(k => k + 1)
   }

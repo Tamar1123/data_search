@@ -158,7 +158,6 @@ def save_dataset():
     name = (data.get("name") or "Untitled").strip()
     headers = data.get("headers", [])
     rows = data.get("rows", [])
-    context = data.get("context", {})
     if not username:
         return jsonify({"error": "username is required"}), 400
     db = get_db()
@@ -166,15 +165,16 @@ def save_dataset():
         "SELECT id FROM datasets WHERE username = ? AND name = ?", (username, name)
     ).fetchone()
     if existing:
+        # context (including summary) is managed server-side; never overwrite it from the client
         db.execute(
-            "UPDATE datasets SET headers = ?, rows = ?, context = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (json.dumps(headers), json.dumps(rows), json.dumps(context), existing["id"]),
+            "UPDATE datasets SET headers = ?, rows = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (json.dumps(headers), json.dumps(rows), existing["id"]),
         )
         db.commit()
         return jsonify({"id": existing["id"], "name": name})
     cursor = db.execute(
         "INSERT INTO datasets (username, name, headers, rows, context) VALUES (?, ?, ?, ?, ?)",
-        (username, name, json.dumps(headers), json.dumps(rows), json.dumps(context)),
+        (username, name, json.dumps(headers), json.dumps(rows), "{}"),
     )
     db.commit()
     return jsonify({"id": cursor.lastrowid, "name": name}), 201
@@ -241,7 +241,7 @@ def build_llm_prompt(user_query, table_schema, summary, history, rows=None, head
     return (
         "You are a data analyst for a CSV exploration app.\n"
         "Respond ONLY with a JSON object — no markdown, no extra text:\n"
-        '{"answer_template": "...", "sql": "..."}\n\n'
+        '{"answer_template": "...", "sql": "...", "updated_summary": "..."}\n\n'
         "Rules:\n"
         '- "answer_template": A concise natural-language answer (1-3 sentences). '
         'If you set sql to a query, include exactly ONE {result} placeholder. '
@@ -256,8 +256,11 @@ def build_llm_prompt(user_query, table_schema, summary, history, rows=None, head
         "- Use sql for aggregations (counts, averages, max/min) that require scanning all rows.\n"
         "- Handle empty/missing values: add WHERE \"col\" != '' for aggregations on nullable columns.\n"
         "- For numeric operations on string-typed columns, use CAST(\"col\" AS REAL) and filter non-numeric rows.\n"
+        '- "updated_summary": 1-3 sentences describing the dataset. '
+        'If "Current summary" below is empty, write one from scratch using the schema and sample. '
+        'If it exists, keep its facts and append any new insight from this Q&A. Never repeat the same insight twice.\n'
         f"Table schema:\n{table_schema}\n\n"
-        f"Context: {summary}\n\n"
+        f"Current summary: {summary}\n\n"
         f"{sample_section}"
         f"Recent conversation:\n{formatted_history}"
         f"USER: {user_query}\n"
@@ -326,22 +329,23 @@ def chat():
     data = request.get_json(silent=True) or {}
     query = (data.get("query") or "").strip()
     schema = data.get("schema", "")
-    summary = data.get("summary", "")
     history = data.get("history", [])
     rows = data.get("rows", [])
     headers = data.get("headers", [])
     dataset_id = data.get("dataset_id")
+    summary = ""
 
     if not query:
         return jsonify({"error": "query is required"}), 400
 
     if dataset_id:
         row_data = get_db().execute(
-            "SELECT rows, headers FROM datasets WHERE id = ?", (dataset_id,)
+            "SELECT rows, headers, context FROM datasets WHERE id = ?", (dataset_id,)
         ).fetchone()
         if row_data:
             rows = json.loads(row_data["rows"])
             headers = json.loads(row_data["headers"])
+            summary = json.loads(row_data["context"] or "{}").get("summary", "")
 
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -600,9 +604,7 @@ def ask():
     rows = json.loads(row_data["rows"])
     headers = json.loads(row_data["headers"])
     context = json.loads(row_data["context"] or "{}")
-
-    col_names = [h[0] for h in headers]
-    schema = ", ".join(f'"{c}"' for c in col_names)
+    schema = ", ".join(f'"{h[0]}"' for h in headers)
     summary = context.get("summary", "")
 
     api_key = os.getenv("GROQ_API_KEY")
@@ -610,8 +612,7 @@ def ask():
         return jsonify({"error": "GROQ_API_KEY not configured"}), 503
 
     try:
-        from openai import OpenAI as _OpenAI
-        client = _OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
+        client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
         prompt = build_llm_prompt(question, schema, summary, history, rows, headers)
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -641,6 +642,18 @@ def ask():
                 answer = answer_template.replace("{result}", f"(query error: {sql_err})")
         else:
             answer = answer_template.replace("{result}", "")
+
+        updated_summary = parsed.get("updated_summary", "").strip()
+        if updated_summary:
+            try:
+                db = get_db()
+                db.execute(
+                    "UPDATE datasets SET context = ? WHERE id = ?",
+                    (json.dumps({"summary": updated_summary}), dataset_id),
+                )
+                db.commit()
+            except Exception:
+                pass
 
         return jsonify({"answer": answer, "sql": sql, "sql_result": sql_result})
     except (json.JSONDecodeError, KeyError):
