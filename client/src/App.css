@@ -1,0 +1,88 @@
+.app-wrap {
+  height: 100svh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 24px;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.app-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-datasets-btn {
+  padding: 5px 14px;
+  font-size: 13px;
+  font-family: var(--sans);
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+  letter-spacing: 0.3px;
+}
+
+.app-datasets-btn:hover {
+  background: var(--accent-bg);
+  box-shadow: var(--glow-cyan);
+}
+
+.app-datasets-btn.active {
+  background: var(--accent-bg);
+}
+
+.app-welcome {
+  font-size: 14px;
+  color: var(--accent);
+  letter-spacing: 0.4px;
+}
+
+.app-signout {
+  padding: 5px 14px;
+  font-size: 13px;
+  font-family: var(--sans);
+  border: 1px solid var(--purple);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--purple);
+  cursor: pointer;
+  transition: color 0.15s, box-shadow 0.15s;
+  letter-spacing: 0.3px;
+}
+
+.app-signout:hover {
+  color: #fff;
+  box-shadow: var(--glow-purple);
+}
+
+.app-body {
+  display: flex;
+  gap: 20px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
