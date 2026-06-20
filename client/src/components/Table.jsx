@@ -1,155 +1,67 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import './Table.css'
 
+const PAGE_SIZE = 50
+
 const OPERATORS = {
-  string: ['contains', 'equals', 'starts_with'],
-  number: ['=', '>', '<', '>=', '<='],
-  date: ['=', 'before', 'after'],
-  boolean: ['is true', 'is false'],
+  string:  [{ label: 'contains',     op: 'contains'    },
+            { label: 'equals',       op: 'equals'      },
+            { label: 'starts with',  op: 'starts_with' }],
+  limited: [{ label: 'equals',       op: 'equals'      }],
+  number:  [{ label: '=',            op: 'eq'          },
+            { label: '>',            op: 'gt'          },
+            { label: '<',            op: 'lt'          },
+            { label: '≥',            op: 'gte'         },
+            { label: '≤',            op: 'lte'         }],
+  date:    [{ label: 'equals',       op: 'eq'          },
+            { label: 'before',       op: 'lt'          },
+            { label: 'after',        op: 'gt'          },
+            { label: 'on or before', op: 'lte'         },
+            { label: 'on or after',  op: 'gte'         }],
+  boolean: [{ label: 'is true',      op: 'is_true'     },
+            { label: 'is false',     op: 'is_false'    }],
 }
 
 const DEFAULT_OP = {
-  string: 'contains',
-  number: '=',
-  date: '=',
-  boolean: 'is true',
+  string: 'contains', limited: 'equals', number: 'eq', date: 'eq', boolean: 'is_true',
 }
 
-function matchesFilter(value, operator, filterValue, type) {
-  const v = String(value ?? '').toLowerCase()
-  const fv = filterValue.toLowerCase()
-
-  if (type === 'string') {
-    if (operator === 'contains') return v.includes(fv)
-    if (operator === 'equals') return v === fv
-    if (operator === 'starts_with') return v.startsWith(fv)
-  }
-
-  if (type === 'number') {
-    const n = Number(value)
-    const fn = Number(filterValue)
-    if (isNaN(n) || isNaN(fn)) return false
-    if (operator === '=') return n === fn
-    if (operator === '>') return n > fn
-    if (operator === '<') return n < fn
-    if (operator === '>=') return n >= fn
-    if (operator === '<=') return n <= fn
-  }
-
-  if (type === 'date') {
-    const d = new Date(value)
-    const fd = new Date(filterValue)
-    if (isNaN(d) || isNaN(fd)) return false
-    if (operator === '=') return d.getTime() === fd.getTime()
-    if (operator === 'before') return d < fd
-    if (operator === 'after') return d > fd
-  }
-
-  if (type === 'boolean') {
-    const b = String(value).toLowerCase() === 'true'
-    if (operator === 'is true') return b
-    if (operator === 'is false') return !b
-  }
-
-  return true
-}
-
-function FilterRow({ filter, headers, rows, onUpdate, onRemove }) {
-  const colType = headers.find(([col]) => col === filter.column)?.[1] ?? 'string'
+function FilterRow({ filter, colMeta, onUpdate, onRemove }) {
+  const col = colMeta.find(c => c.name === filter.col)
+  const colType = col?.type ?? 'string'
   const operators = OPERATORS[colType] ?? OPERATORS.string
-  const showValueInput = colType !== 'boolean'
-  const isEquality = filter.operator === 'equals' || filter.operator === '='
+  const showValue = colType !== 'boolean'
 
-  const uniqueVals = isEquality && colType === 'string'
-    ? [...new Set(rows.map(r => String(r[filter.column] ?? '')).filter(v => v !== ''))].sort()
-    : []
-  const showDropdown = uniqueVals.length > 0 && uniqueVals.length <= 10
-
-  function handleColumnChange(e) {
+  function handleColChange(e) {
     const newCol = e.target.value
-    const newType = headers.find(([col]) => col === newCol)?.[1] ?? 'string'
-    onUpdate(filter.id, { column: newCol, operator: DEFAULT_OP[newType], value: '' })
+    const newType = colMeta.find(c => c.name === newCol)?.type ?? 'string'
+    onUpdate(filter.id, { col: newCol, op: DEFAULT_OP[newType], val: '' })
   }
 
   return (
     <div className="table-filter-row">
-      <select value={filter.column} onChange={handleColumnChange}>
-        {headers.map(([col]) => <option key={col} value={col}>{col}</option>)}
+      <select value={filter.col} onChange={handleColChange}>
+        {colMeta.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
       </select>
-      <select value={filter.operator} onChange={e => onUpdate(filter.id, { operator: e.target.value, value: '' })}>
-        {operators.map(op => <option key={op} value={op}>{op}</option>)}
+      <select value={filter.op} onChange={e => onUpdate(filter.id, { op: e.target.value, val: '' })}>
+        {operators.map(({ label, op }) => <option key={op} value={op}>{label}</option>)}
       </select>
-      {showValueInput && (
-        showDropdown
-          ? <select value={filter.value} onChange={e => onUpdate(filter.id, { value: e.target.value })}>
+      {showValue && (
+        colType === 'limited' && col?.options
+          ? <select value={filter.val} onChange={e => onUpdate(filter.id, { val: e.target.value })}>
               <option value="">— any —</option>
-              {uniqueVals.map(v => <option key={v} value={v}>{v}</option>)}
+              {col.options.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
           : <input
               type={colType === 'number' ? 'number' : colType === 'date' ? 'date' : 'text'}
-              value={filter.value}
+              value={filter.val}
               placeholder="value"
-              onChange={e => onUpdate(filter.id, { value: e.target.value })}
+              onChange={e => onUpdate(filter.id, { val: e.target.value })}
             />
       )}
       <button className="table-btn table-btn-remove" onClick={() => onRemove(filter.id)}>×</button>
     </div>
   )
-}
-
-function parseCSVLine(line) {
-  const fields = []
-  let i = 0
-  while (i < line.length) {
-    if (line[i] === '"') {
-      let field = ''
-      i++
-      while (i < line.length) {
-        if (line[i] === '"' && line[i + 1] === '"') { field += '"'; i += 2 }
-        else if (line[i] === '"') { i++; break }
-        else { field += line[i++] }
-      }
-      fields.push(field)
-      if (line[i] === ',') i++
-    } else {
-      const end = line.indexOf(',', i)
-      if (end === -1) { fields.push(line.slice(i)); break }
-      fields.push(line.slice(i, end))
-      i = end + 1
-    }
-  }
-  return fields
-}
-
-function inferType(values) {
-  const nonEmpty = values.filter(v => v !== '')
-  if (nonEmpty.length === 0) return 'string'
-  if (nonEmpty.every(v => ['true', 'false'].includes(v.toLowerCase()))) return 'boolean'
-  if (nonEmpty.every(v => !isNaN(Number(v)))) return 'number'
-  if (nonEmpty.every(v => /^\d{4}-\d{2}-\d{2}$/.test(v))) return 'date'
-  return 'string'
-}
-
-function parseCSV(text, fallbackName = 'Table') {
-  const lines = text.split('\n').filter(l => l.trim() && !l.startsWith('#'))
-  if (lines.length < 1) throw new Error('File is empty')
-
-  const colNames = parseCSVLine(lines[0])
-  if (colNames.length === 0) throw new Error('No columns found in header row')
-
-  const rows = lines.slice(1).map(line => {
-    const values = parseCSVLine(line)
-    return Object.fromEntries(colNames.map((col, i) => [col, values[i] ?? '']))
-  })
-
-  const headers = colNames.map(col => [col, inferType(rows.map(r => r[col] ?? ''))])
-
-  return { name: fallbackName, headers, rows }
-}
-
-function buildContextSummary(name, hdrs, rowCount) {
-  const cols = hdrs.map(([col, type]) => `${col} (${type})`).join(', ')
-  return `Dataset "${name}": ${rowCount} rows. Columns: ${cols}.`
 }
 
 export default function Table({
@@ -162,17 +74,21 @@ export default function Table({
   datasetId = null,
   onOpenDatasets = null,
 }) {
+  const [currentDatasetId, setCurrentDatasetId] = useState(datasetId)
+  const [colMeta, setColMeta] = useState([])
+  const [columns, setColumns] = useState(() => headers.map(h => (Array.isArray(h) ? h[0] : h)))
+  const [rows, setRows] = useState([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
+  const [pages, setPages] = useState(1)
   const [tableName, setTableName] = useState(name)
-  const [tableHeaders, setHeaders] = useState(headers)
-  const [rows, setRows] = useState(content)
   const [searchText, setSearchText] = useState('')
   const [filters, setFilters] = useState([])
   const [nextFilterId, setNextFilterId] = useState(0)
   const [fileError, setFileError] = useState('')
-  const [typeErrors, setTypeErrors] = useState([])
+  const [uploading, setUploading] = useState(false)
   const [showTextInput, setShowTextInput] = useState(false)
   const [rawText, setRawText] = useState('')
-  const [context, setContext] = useState({ summary: initialContext?.summary ?? '' })
   const [saved, setSaved] = useState(false)
   const [chatHistory, setChatHistory] = useState([])
   const [chatInput, setChatInput] = useState('')
@@ -181,6 +97,49 @@ export default function Table({
   const fileInputRef = useRef(null)
   const chatEndRef = useRef(null)
   const chatInputRef = useRef(null)
+  const fetchAbortRef = useRef(null)
+
+  // Only active filters are sent to the server
+  const filtersJson = useMemo(() => {
+    const active = filters.filter(f => f.val !== '' || f.op === 'is_true' || f.op === 'is_false')
+    return active.length ? JSON.stringify(active.map(({ col, op, val }) => ({ col, op, val }))) : ''
+  }, [filters])
+
+  const fetchRows = useCallback(async (dsId, pg, search, fJson) => {
+    if (!dsId) return
+    if (fetchAbortRef.current) fetchAbortRef.current.abort()
+    const controller = new AbortController()
+    fetchAbortRef.current = controller
+
+    const params = new URLSearchParams({ dataset_id: dsId, page: pg, page_size: PAGE_SIZE })
+    if (search) params.set('search', search)
+    if (fJson) params.set('filters', fJson)
+    try {
+      const res = await fetch(`/api/rows?${params}`, { signal: controller.signal })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to load rows')
+      setRows(data.rows)
+      setTotal(data.total)
+      setPages(data.pages)
+      if (data.columns.length > 0) setColumns(data.columns)
+    } catch (err) {
+      if (err.name === 'AbortError') return
+      setFileError(err.message)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchRows(currentDatasetId, page, searchText, filtersJson)
+  }, [currentDatasetId, page, searchText, filtersJson, fetchRows])
+
+  // Fetch column type metadata whenever the dataset changes
+  useEffect(() => {
+    if (!currentDatasetId) { setColMeta([]); return }
+    fetch(`/api/columns?dataset_id=${currentDatasetId}`)
+      .then(r => r.json())
+      .then(data => setColMeta(data.columns ?? []))
+      .catch(() => {})
+  }, [currentDatasetId])
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -190,95 +149,86 @@ export default function Table({
     if (!chatLoading) chatInputRef.current?.focus()
   }, [chatLoading])
 
-  async function validateTypes(hdrs, rws) {
+  async function uploadData(body, isMultipart) {
+    setUploading(true)
+    setFileError('')
     try {
-      const res = await fetch('/api/validate-types', {
+      const res = await fetch('/api/upload', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headers: hdrs, rows: rws }),
+        ...(isMultipart
+          ? { body }
+          : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
       })
       const data = await res.json()
-      if (!res.ok) {
-        setFileError(data.error ?? 'Type validation request failed')
-        return
-      }
-      setTypeErrors(data.errors)
-    } catch {
-      setFileError('Could not reach server for type validation')
+      if (!res.ok) throw new Error(data.error || 'Upload failed')
+      setCurrentDatasetId(data.dataset_id)
+      setColumns(data.columns)
+      setTableName(data.name)
+      setPage(1)
+      setSearchText('')
+      setFilters([])
+      setNextFilterId(0)
+      setSaved(false)
+      setChatHistory([])
+    } catch (err) {
+      setFileError(err.message)
+    } finally {
+      setUploading(false)
     }
   }
 
   function handleFileLoad(e) {
     const file = e.target.files?.[0]
     if (!file) return
-    const fileName = file.name.replace(/\.[^/.]+$/, '')
-    const reader = new FileReader()
-    reader.onload = ev => {
-      try {
-        const { name: parsedName, headers: parsedHeaders, rows: parsedRows } = parseCSV(ev.target.result, fileName)
-        setTableName(parsedName)
-        setHeaders(parsedHeaders)
-        setRows(parsedRows)
-        setSearchText('')
-        setFilters([])
-        setNextFilterId(0)
-        setFileError('')
-        setTypeErrors([])
-        setSaved(false)
-        setContext({ summary: buildContextSummary(parsedName, parsedHeaders, parsedRows.length) })
-        validateTypes(parsedHeaders, parsedRows)
-      } catch (err) {
-        setFileError(err.message)
-      }
-    }
-    reader.onerror = () => setFileError('Could not read file')
-    reader.readAsText(file)
+    const formData = new FormData()
+    formData.append('file', file)
+    uploadData(formData, true)
     e.target.value = ''
   }
 
   function handleTextLoad() {
+    uploadData({ csv: rawText, name: tableName || 'Table' }, false)
+    setShowTextInput(false)
+    setRawText('')
+  }
+
+  async function handleSave() {
+    if (!onSave || !currentDatasetId) return
     try {
-      const { name: parsedName, headers: parsedHeaders, rows: parsedRows } = parseCSV(rawText, tableName || 'Table')
-      setTableName(parsedName)
-      setHeaders(parsedHeaders)
-      setRows(parsedRows)
-      setSearchText('')
-      setFilters([])
-      setNextFilterId(0)
-      setFileError('')
-      setTypeErrors([])
-      setShowTextInput(false)
-      setRawText('')
-      setSaved(false)
-      setContext({ summary: buildContextSummary(parsedName, parsedHeaders, parsedRows.length) })
-      validateTypes(parsedHeaders, parsedRows)
+      const params = new URLSearchParams({ dataset_id: currentDatasetId, page: 1, page_size: 10000 })
+      const res = await fetch(`/api/rows?${params}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      await onSave({
+        name: tableName,
+        headers: data.columns.map(c => [c, 'string']),
+        rows: data.rows,
+        context: { summary: '' },
+      })
+      setSaved(true)
     } catch (err) {
       setFileError(err.message)
     }
   }
 
   async function handleChat() {
-    const query = chatInput.trim()
-    if (!query) return
-    const userMsg = { role: 'user', content: query }
+    const question = chatInput.trim()
+    if (!question || !currentDatasetId) return
+    const userMsg = { role: 'user', content: question }
     const newHistory = [...chatHistory, userMsg]
     setChatHistory(newHistory)
     setChatInput('')
     setChatLoading(true)
     chatInputRef.current?.focus()
     try {
-      const schema = `Columns: ${tableHeaders.map(([col, type]) => `${col} (${type})`).join(', ')}\nTotal rows: ${rows.length}`
-      const body = datasetId
-        ? { query, schema, summary: context.summary, history: chatHistory, dataset_id: datasetId, headers: tableHeaders }
-        : { query, schema, summary: context.summary, history: chatHistory, rows, headers: tableHeaders }
-      const res = await fetch('/api/chat', {
+      const res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ dataset_id: currentDatasetId, question, history: chatHistory }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Chat request failed')
-      setChatHistory([...newHistory, { role: 'assistant', content: data.response }])
+      if (!res.ok) throw new Error(data.error || 'Request failed')
+      setChatHistory([...newHistory, { role: 'assistant', content: data.answer }])
     } catch (err) {
       setChatHistory([...newHistory, { role: 'assistant', content: `Error: ${err.message}` }])
     } finally {
@@ -287,74 +237,58 @@ export default function Table({
   }
 
   function clearTable() {
-    setTableName('')
-    setHeaders([])
+    setCurrentDatasetId(null)
+    setColMeta([])
+    setColumns([])
     setRows([])
-    setFilters([])
+    setTotal(0)
+    setPage(1)
+    setPages(1)
+    setTableName('')
     setSearchText('')
-    setTypeErrors([])
+    setFilters([])
+    setNextFilterId(0)
     setFileError('')
-    setContext({ summary: '' })
+    setSaved(false)
     setChatHistory([])
     setChatInput('')
   }
 
   function addFilter() {
-    if (tableHeaders.length === 0) return
-    const [col, type] = tableHeaders[0]
-    setFilters(prev => [...prev, { id: nextFilterId, column: col, operator: DEFAULT_OP[type], value: '' }])
+    if (colMeta.length === 0) return
+    const first = colMeta[0]
+    setFilters(prev => [...prev, { id: nextFilterId, col: first.name, op: DEFAULT_OP[first.type], val: '' }])
     setNextFilterId(n => n + 1)
+    setPage(1)
   }
 
   function updateFilter(id, patch) {
-    setFilters(prev => prev.map(f => {
-      if (f.id !== id) return f
-      const updated = { ...f, ...patch }
-      if (patch.column !== undefined) {
-        const newType = tableHeaders.find(([col]) => col === patch.column)?.[1] ?? 'string'
-        updated.operator = DEFAULT_OP[newType]
-        updated.value = ''
-      }
-      return updated
-    }))
+    setFilters(prev => prev.map(f => f.id !== id ? f : { ...f, ...patch }))
+    setPage(1)
   }
 
   function removeFilter(id) {
     setFilters(prev => prev.filter(f => f.id !== id))
+    setPage(1)
   }
 
-  const filteredRows = rows.filter(row =>
-    filters.every(f => {
-      if (f.value === '' && f.operator !== 'is true' && f.operator !== 'is false') return true
-      const colType = tableHeaders.find(([col]) => col === f.column)?.[1] ?? 'string'
-      return matchesFilter(row[f.column], f.operator, f.value, colType)
-    })
-  )
-
-  const visibleRows = searchText
-    ? filteredRows.filter(row =>
-        tableHeaders.some(([col]) =>
-          String(row[col] ?? '').toLowerCase().includes(searchText.toLowerCase())
-        )
-      )
-    : filteredRows
+  const hasData = currentDatasetId !== null && columns.length > 0
 
   return (
     <section className="table-root">
-      {/* Hidden file input — always mounted so ref is always valid */}
       <input ref={fileInputRef} type="file" accept=".txt,.csv" hidden onChange={handleFileLoad} />
 
-      {tableHeaders.length === 0 ? (
-        /* ── Landing / upload state ── */
+      {!hasData ? (
         <div className="table-upload-landing">
           <p className="table-upload-title">Load a dataset to explore</p>
           <div className="table-upload-options">
             <button
               className="table-upload-option"
               onClick={() => { setShowTextInput(false); setFileError(''); fileInputRef.current.click() }}
+              disabled={uploading}
             >
               <strong>Load from file</strong>
-              <span>Upload a CSV or TXT file</span>
+              <span>{uploading ? 'Uploading…' : 'Upload a CSV or TXT file'}</span>
             </button>
             <button
               className="table-upload-option"
@@ -380,7 +314,7 @@ export default function Table({
                 rows={6}
               />
               <div className="table-text-input-actions">
-                <button className="table-btn" onClick={handleTextLoad}>Apply</button>
+                <button className="table-btn" onClick={handleTextLoad} disabled={uploading}>Apply</button>
                 <button className="table-btn" onClick={() => { setShowTextInput(false); setRawText(''); setFileError('') }}>Cancel</button>
               </div>
             </div>
@@ -389,7 +323,6 @@ export default function Table({
           {fileError && <span className="table-error">{fileError}</span>}
         </div>
       ) : (
-        /* ── Dataset loaded state ── */
         <>
           {readOnly
             ? <p className="table-name-display">{tableName}</p>
@@ -405,7 +338,7 @@ export default function Table({
           {!readOnly && (
             <div className="table-file-loader">
               {onSave && !saved && (
-                <button className="table-btn" onClick={() => { onSave({ name: tableName, headers: tableHeaders, rows, context }); setSaved(true) }}>Save</button>
+                <button className="table-btn" onClick={handleSave}>Save</button>
               )}
               <button className="table-btn table-btn-danger" onClick={clearTable}>
                 {saved ? 'Upload new dataset' : 'Clear'}
@@ -414,61 +347,68 @@ export default function Table({
             </div>
           )}
 
-          {typeErrors.length > 0 && (
-            <div className="table-type-errors">
-              <strong>Type errors:</strong>
-              <ul>
-                {typeErrors.map((e, i) => (
-                  <li key={i}>Row {e.row}, &ldquo;{e.column}&rdquo;: expected {e.expected}, got &ldquo;{e.value}&rdquo;</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
           <div className="table-search">
             <input
               type="search"
               placeholder="Search all columns…"
               value={searchText}
-              onChange={ev => setSearchText(ev.target.value)}
+              onChange={e => { setSearchText(e.target.value); setPage(1) }}
             />
-          </div>
-
-          <div className="table-filters">
-            {filters.map(f => (
-              <FilterRow key={f.id} filter={f} headers={tableHeaders} rows={rows} onUpdate={updateFilter} onRemove={removeFilter} />
-            ))}
-            <button className="table-btn table-add-filter" onClick={addFilter}>+ Add filter</button>
           </div>
 
           <div className="table-body-row">
             <div className="table-col">
+              <div className="table-filters">
+                {filters.map(f => (
+                  <FilterRow key={f.id} filter={f} colMeta={colMeta} onUpdate={updateFilter} onRemove={removeFilter} />
+                ))}
+                <button className="table-btn table-add-filter" onClick={addFilter} disabled={colMeta.length === 0}>
+                  + Add filter
+                </button>
+                {filters.length > 0 && (
+                  <button className="table-btn" onClick={() => { setFilters([]); setPage(1) }}>
+                    Reset filters
+                  </button>
+                )}
+              </div>
               <div className="table-scroll-wrapper">
                 <table className="table-grid">
                   <thead>
                     <tr>
-                      {tableHeaders.map(([col]) => <th key={col}>{col}</th>)}
+                      {columns.map(col => <th key={col}>{col}</th>)}
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleRows.map((row, i) => (
+                    {rows.map((row, i) => (
                       <tr key={i}>
-                        {tableHeaders.map(([col]) => <td key={col}>{String(row[col] ?? '')}</td>)}
+                        {columns.map(col => <td key={col}>{String(row[col] ?? '')}</td>)}
                       </tr>
                     ))}
-                    {visibleRows.length === 0 && (
+                    {rows.length === 0 && (
                       <tr className="table-empty">
-                        <td colSpan={tableHeaders.length || 1}>No results.</td>
+                        <td colSpan={columns.length || 1}>No results.</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
-              <p className="table-row-count">
-                {visibleRows.length < rows.length
-                  ? `${visibleRows.length} of ${rows.length} rows`
-                  : `${rows.length} rows`}
-              </p>
+
+              <div className="table-pagination">
+                <p className="table-row-count">
+                  {total === 0
+                    ? 'No rows'
+                    : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} of ${total} rows`}
+                </p>
+                {pages > 1 && (
+                  <div className="table-page-controls">
+                    <button className="table-btn" disabled={page <= 1} onClick={() => setPage(1)}>«</button>
+                    <button className="table-btn" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>‹</button>
+                    <span className="table-page-label">Page {page} of {pages}</span>
+                    <button className="table-btn" disabled={page >= pages} onClick={() => setPage(p => p + 1)}>›</button>
+                    <button className="table-btn" disabled={page >= pages} onClick={() => setPage(pages)}>»</button>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="table-chat">

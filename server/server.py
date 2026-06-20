@@ -1,4 +1,7 @@
+import csv
+import io
 import os
+import re
 import json
 import sqlite3
 from datetime import datetime
@@ -411,6 +414,234 @@ def validate_types():
                     errors.append({"row": row_idx, "column": col_name, "expected": "boolean (true/false)", "value": str_value})
 
     return jsonify({"errors": errors})
+
+
+@app.post("/api/upload")
+def upload_csv():
+    if request.content_type and "multipart" in request.content_type:
+        f = request.files.get("file")
+        if not f:
+            return jsonify({"error": "file is required"}), 400
+        filename = f.filename or "upload.csv"
+        content = f.read().decode("utf-8-sig")
+    else:
+        body = request.get_json(silent=True) or {}
+        content = body.get("csv", "")
+        filename = body.get("name", "upload.csv")
+
+    if not content.strip():
+        return jsonify({"error": "CSV content is empty"}), 400
+
+    reader = csv.DictReader(io.StringIO(content))
+    col_names = reader.fieldnames or []
+    if not col_names:
+        return jsonify({"error": "CSV has no columns"}), 400
+    rows = [dict(row) for row in reader]
+    headers = [[col, "string"] for col in col_names]
+
+    db = get_db()
+    cursor = db.execute(
+        "INSERT INTO datasets (username, name, headers, rows, context) VALUES (?, ?, ?, ?, ?)",
+        ("anonymous", filename, json.dumps(headers), json.dumps(rows), "{}"),
+    )
+    db.commit()
+    return jsonify({
+        "dataset_id": cursor.lastrowid,
+        "name": filename,
+        "columns": col_names,
+        "row_count": len(rows),
+    }), 201
+
+
+def _infer_type(values):
+    non_empty = [v for v in values if v.strip()]
+    if not non_empty:
+        return "string"
+    if all(v.lower() in ("true", "false") for v in non_empty):
+        return "boolean"
+    try:
+        for v in non_empty:
+            float(v)
+        return "number"
+    except ValueError:
+        pass
+    if all(re.match(r"^\d{4}-\d{2}-\d{2}$", v) for v in non_empty):
+        return "date"
+    return "string"
+
+
+def _apply_filter(value, op, filter_val):
+    v = str(value or "").strip()
+    fv = filter_val.strip()
+    if op == "contains":
+        return fv.lower() in v.lower()
+    if op in ("equals", "eq"):
+        return v.lower() == fv.lower()
+    if op == "starts_with":
+        return v.lower().startswith(fv.lower())
+    if op == "is_true":
+        return v.lower() == "true"
+    if op == "is_false":
+        return v.lower() != "true"
+    if op in ("gt", "gte", "lt", "lte"):
+        try:
+            n, fn = float(v), float(fv)
+            return {"gt": n > fn, "gte": n >= fn, "lt": n < fn, "lte": n <= fn}[op]
+        except ValueError:
+            pass
+        try:
+            from datetime import datetime as _dt
+            d, fd = _dt.strptime(v, "%Y-%m-%d"), _dt.strptime(fv, "%Y-%m-%d")
+            return {"gt": d > fd, "gte": d >= fd, "lt": d < fd, "lte": d <= fd}[op]
+        except ValueError:
+            pass
+        return False
+    return True
+
+
+@app.get("/api/columns")
+def get_column_meta():
+    dataset_id = request.args.get("dataset_id", type=int)
+    if not dataset_id:
+        return jsonify({"error": "dataset_id is required"}), 400
+
+    row_data = get_db().execute(
+        "SELECT rows, headers FROM datasets WHERE id = ?", (dataset_id,)
+    ).fetchone()
+    if not row_data:
+        return jsonify({"error": "Dataset not found"}), 404
+
+    rows = json.loads(row_data["rows"])
+    headers = json.loads(row_data["headers"])
+
+    result = []
+    for h in headers:
+        col = h[0]
+        values = [str(r.get(col, "") or "") for r in rows]
+        col_type = _infer_type(values)
+        unique_vals = sorted({v for v in values if v.strip()})
+        entry = {"name": col, "type": col_type, "options": None}
+        if col_type == "string" and 0 < len(unique_vals) <= 10:
+            entry["type"] = "limited"
+            entry["options"] = unique_vals
+        result.append(entry)
+
+    return jsonify({"columns": result})
+
+
+@app.get("/api/rows")
+def get_rows():
+    dataset_id = request.args.get("dataset_id", type=int)
+    if not dataset_id:
+        return jsonify({"error": "dataset_id is required"}), 400
+
+    row_data = get_db().execute(
+        "SELECT rows, headers FROM datasets WHERE id = ?", (dataset_id,)
+    ).fetchone()
+    if not row_data:
+        return jsonify({"error": "Dataset not found"}), 404
+
+    rows = json.loads(row_data["rows"])
+    headers = json.loads(row_data["headers"])
+    col_names = [h[0] for h in headers]
+
+    search = request.args.get("search", "").strip().lower()
+    if search:
+        rows = [r for r in rows if any(search in str(v).lower() for v in r.values())]
+
+    filters_raw = request.args.get("filters", "")
+    if filters_raw:
+        try:
+            for f in json.loads(filters_raw):
+                col, op, val = f.get("col", ""), f.get("op", ""), f.get("val", "")
+                if col not in col_names:
+                    continue
+                rows = [r for r in rows if _apply_filter(r.get(col, ""), op, val)]
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+    total = len(rows)
+    page = max(1, request.args.get("page", 1, type=int))
+    page_size = min(500, max(1, request.args.get("page_size", 50, type=int)))
+    start = (page - 1) * page_size
+    return jsonify({
+        "rows": rows[start:start + page_size],
+        "columns": col_names,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, (total + page_size - 1) // page_size),
+    })
+
+
+@app.post("/api/ask")
+def ask():
+    data = request.get_json(silent=True) or {}
+    dataset_id = data.get("dataset_id")
+    question = (data.get("question") or "").strip()
+    history = data.get("history", [])
+
+    if not dataset_id:
+        return jsonify({"error": "dataset_id is required"}), 400
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+
+    row_data = get_db().execute(
+        "SELECT rows, headers, context FROM datasets WHERE id = ?", (dataset_id,)
+    ).fetchone()
+    if not row_data:
+        return jsonify({"error": "Dataset not found"}), 404
+
+    rows = json.loads(row_data["rows"])
+    headers = json.loads(row_data["headers"])
+    context = json.loads(row_data["context"] or "{}")
+
+    col_names = [h[0] for h in headers]
+    schema = ", ".join(f'"{c}"' for c in col_names)
+    summary = context.get("summary", "")
+
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        return jsonify({"error": "GROQ_API_KEY not configured"}), 503
+
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
+        prompt = build_llm_prompt(question, schema, summary, history, rows, headers)
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=512,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.1,
+        )
+        raw = completion.choices[0].message.content.strip()
+
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        parsed = json.loads(raw)
+        answer_template = parsed.get("answer_template", raw)
+        sql = parsed.get("sql")
+        sql_result = None
+
+        if sql and answer_template.count("{result}") == 1 and rows and headers:
+            try:
+                results, out_cols = execute_data_query(rows, headers, sql)
+                sql_result = format_query_result(results, out_cols)
+                answer = answer_template.replace("{result}", sql_result)
+            except Exception as sql_err:
+                answer = answer_template.replace("{result}", f"(query error: {sql_err})")
+        else:
+            answer = answer_template.replace("{result}", "")
+
+        return jsonify({"answer": answer, "sql": sql, "sql_result": sql_result})
+    except (json.JSONDecodeError, KeyError):
+        return jsonify({"answer": raw, "sql": None, "sql_result": None})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
