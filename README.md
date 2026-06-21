@@ -60,6 +60,20 @@ cp client/.env.example client/.env
 
 `server/.env` — only `GROQ_API_KEY` and `JWT_SECRET_KEY` are required for local dev. See `server/.env.example` for all options.
 
+Generate a secure `JWT_SECRET_KEY`:
+
+```bash
+openssl rand -hex 32
+```
+
+Or with Python if `openssl` is not available:
+
+```bash
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Paste the output as the value of `JWT_SECRET_KEY` in `server/.env`.
+
 Get your Groq API key: https://console.groq.com/keys
 
 ### Install Dependencies
