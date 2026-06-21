@@ -84,7 +84,7 @@ export default function Auth({ onAuth }) {
             placeholder="Username"
             value={username}
             onChange={e => setUsername(e.target.value)}
-            autoComplete="username"
+            autoComplete="off"
             required
           />
           <input
@@ -92,7 +92,7 @@ export default function Auth({ onAuth }) {
             placeholder="Password"
             value={password}
             onChange={e => setPassword(e.target.value)}
-            autoComplete={isRegister ? 'new-password' : 'current-password'}
+            autoComplete="off"
             maxLength={55}
             required
           />
