@@ -25,16 +25,21 @@ A full-stack web application for exploring CSV datasets. Upload a file, build ne
 ## Project Structure
 
 ```
-├── client/          → React + Vite frontend
+├── client/                  → React + Vite frontend
+│   ├── .env.example         → frontend env var template
 │   └── src/
-│       ├── App.jsx               → auth, dataset load/save orchestration
+│       ├── api.js            → API base URL (reads VITE_API_URL)
+│       ├── App.jsx           → auth, dataset load/save orchestration
 │       └── components/
-│           ├── Table.jsx         → upload, filter, pagination, chat UI
-│           └── DatasetList.jsx   → saved dataset browser
+│           ├── Table.jsx     → upload, filter, pagination, chat UI
+│           └── DatasetList.jsx → saved dataset browser
 └── server/
-    ├── server.py    → Flask API (all routes)
+    ├── server.py             → Flask API (all routes + OpenAPI spec)
+    ├── Procfile              → gunicorn start command for Railway
+    ├── requirements.txt      → Python dependencies
+    ├── .env.example          → backend env var template
     └── data/
-        └── data.db  → SQLite database (auto-created)
+        └── data.db           → SQLite database (auto-created)
 ```
 
 ## Getting Started
@@ -46,15 +51,14 @@ A full-stack web application for exploring CSV datasets. Upload a file, build ne
 
 ### Environment Setup
 
-Create a `.env` file in the `server/` directory:
+Copy the example files and fill in your values:
 
 ```bash
-cd server
-cat > .env << EOF
-GROQ_API_KEY=your_groq_api_key_here
-JWT_SECRET_KEY=change-this-in-production
-EOF
+cp server/.env.example server/.env
+cp client/.env.example client/.env
 ```
+
+`server/.env` — only `GROQ_API_KEY` and `JWT_SECRET_KEY` are required for local dev. See `server/.env.example` for all options.
 
 Get your Groq API key: https://console.groq.com/keys
 
@@ -208,21 +212,53 @@ All dataset management endpoints require a `Bearer` JWT token in the `Authorizat
 | `GET` | `/api/datasets/<id>` | — | Fetch a single dataset with all rows |
 | `DELETE` | `/api/datasets/<id>` | required | Delete a dataset |
 
+## Environment Variables
+
+See `server/.env.example` and `client/.env.example` for all variables with descriptions.
+
+**Backend (`server/.env`):**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GROQ_API_KEY` | yes | Groq API key for LLM calls |
+| `JWT_SECRET_KEY` | yes | Secret for signing JWT tokens (use a long random string) |
+| `DB_PATH` | no | SQLite file path. Defaults to `server/data/data.db`. Set to a volume path in production (e.g. `/data/data.db`) |
+| `ALLOWED_ORIGIN` | no | CORS allowed origin. Defaults to `*`. Set to your frontend URL in production |
+| `PORT` | no | Port for `python server.py`. Defaults to `5000`. Injected automatically by Railway |
+| `FLASK_ENV` | no | `development` or `production`. Defaults to `development` |
+
+**Frontend (`client/.env`):**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VITE_API_URL` | no | Backend public URL. Leave empty in dev (Vite proxies `/api` to localhost:5000). Set to your backend Railway URL in production |
+
+## Deployment (Railway)
+
+The app is split into two Railway services from the same GitHub repo.
+
+**Backend service**
+- Root directory: `server`
+- Railpack detects Python and runs `gunicorn` via the `Procfile`
+- Attach a **Volume** mounted at `/data` and set `DB_PATH=/data/data.db` to persist the database across deploys
+- Required env vars: `GROQ_API_KEY`, `JWT_SECRET_KEY`, `DB_PATH`, `FLASK_ENV=production`
+
+**Frontend service**
+- Root directory: `client`
+- Railpack detects Node/Vite and runs `npm run build` automatically
+- Required env var: `VITE_API_URL=https://your-backend.railway.app`
+
+**After both services are live:**
+1. Copy the backend URL → set as `VITE_API_URL` on the frontend service
+2. Copy the frontend URL → set as `ALLOWED_ORIGIN` on the backend service
+3. Railway redeploys each service automatically on env var changes
+
 ## Build for Production
 
 ```bash
 cd client
 npm run build
 # Output in client/dist/
-```
-
-## Environment Variables
-
-`server/.env`:
-
-```
-GROQ_API_KEY=<your_groq_api_key>
-JWT_SECRET_KEY=<strong_random_secret>
 ```
 
 ## Development Notes
