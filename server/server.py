@@ -19,14 +19,16 @@ app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "dev-secret-change-in
 JWTManager(app)
 
 _SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(_SERVER_DIR, "data", "data.db")
+DB_PATH = os.getenv("DB_PATH", os.path.join(_SERVER_DIR, "data", "data.db"))
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+
+_ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "*")
 
 
 @app.after_request
 def add_cors(response):
-    # Allow the Vite dev server (port 5173) to reach this API during development
-    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Origin"] = _ALLOWED_ORIGIN
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
     return response
@@ -1128,6 +1130,7 @@ def swagger_ui():
 </html>""", 200, {"Content-Type": "text/html"}
 
 
+init_db()
+
 if __name__ == "__main__":
-    init_db()
-    app.run(port=5000, debug=True)
+    app.run(port=int(os.getenv("PORT", 5000)), debug=True)

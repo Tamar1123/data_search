@@ -3,6 +3,7 @@ import './App.css'
 import Table from './components/Table'
 import Auth from './components/Auth'
 import DatasetList from './components/DatasetList'
+import { API } from './api'
 
 function App() {
   const [user, setUser] = useState(null)
@@ -24,7 +25,7 @@ function App() {
 
   async function handleSave({ name, headers, rows }) {
     // The server upserts by (username, name) and manages context/summary server-side
-    await fetch('/api/datasets', {
+    await fetch(`${API}/api/datasets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${user.token}` },
       body: JSON.stringify({ name, headers, rows }),

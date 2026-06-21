@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import './Auth.css'
+import { API } from '../api'
 
 const PASSWORD_RULES = [
   { label: '8–45 characters',       test: p => p.length >= 8 && p.length <= 45 },
@@ -36,7 +37,7 @@ export default function Auth({ onAuth }) {
 
     setLoading(true)
     try {
-      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login'
+      const endpoint = isRegister ? `${API}/api/auth/register` : `${API}/api/auth/login`
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

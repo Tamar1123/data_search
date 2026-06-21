@@ -1,5 +1,6 @@
 import { Fragment, useState, useRef, useEffect, useCallback } from 'react'
 import './Table.css'
+import { API } from '../api'
 
 const PAGE_SIZE = 50
 
@@ -166,7 +167,7 @@ export default function Table({
     if (search) params.set('search', search)
     if (fJson) params.set('filters', fJson)
     try {
-      const res = await fetch(`/api/rows?${params}`, { signal: controller.signal })
+      const res = await fetch(`${API}/api/rows?${params}`, { signal: controller.signal })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to load rows')
       setRows(data.rows)
@@ -185,7 +186,7 @@ export default function Table({
 
   useEffect(() => {
     if (!currentDatasetId) { setColMeta([]); return }
-    fetch(`/api/columns?dataset_id=${currentDatasetId}`)
+    fetch(`${API}/api/columns?dataset_id=${currentDatasetId}`)
       .then(r => r.json())
       .then(data => setColMeta(data.columns ?? []))
       .catch(() => {})
@@ -203,7 +204,7 @@ export default function Table({
     setUploading(true)
     setFileError('')
     try {
-      const res = await fetch('/api/upload', {
+      const res = await fetch(`${API}/api/upload`, {
         method: 'POST',
         ...(isMultipart
           ? { body }
@@ -247,7 +248,7 @@ export default function Table({
     if (!onSave || !currentDatasetId) return
     try {
       const params = new URLSearchParams({ dataset_id: currentDatasetId, page: 1, page_size: 10000 })
-      const res = await fetch(`/api/rows?${params}`)
+      const res = await fetch(`${API}/api/rows?${params}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       await onSave({
@@ -271,7 +272,7 @@ export default function Table({
     setChatLoading(true)
     chatInputRef.current?.focus()
     try {
-      const res = await fetch('/api/ask', {
+      const res = await fetch(`${API}/api/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dataset_id: currentDatasetId, question, history: chatHistory }),
