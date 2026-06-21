@@ -512,16 +512,15 @@ _SAMPLE_VAL_MAX = 60
 _HISTORY_TURNS = 4
 
 
-def build_llm_prompt(user_query, table_schema, summary, history, rows=None, headers=None):
-    formatted_history = "".join(
-        f"{t['role'].upper()}: {t['content']}\n" for t in history[-_HISTORY_TURNS:]
-    )
+def build_llm_messages(user_query, table_schema, summary, history, rows=None, headers=None):
+    # Static context → system message so Groq can cache it across turns.
+    # Sample is only sent on the first question; follow-ups rely on the summary + history.
+    is_followup = len(history) > 0
 
     sample_section = ""
-    if rows and headers:
+    if not is_followup and rows and headers:
         col_names = [str(h[0]) for h in headers if h and str(h[0]).strip()]
         sample = random.sample(rows, min(_SAMPLE_ROWS, len(rows)))
-        # Truncate long cell values so wide text columns don't bloat the prompt
         trimmed = [
             {k: (v[:_SAMPLE_VAL_MAX] + "…" if isinstance(v, str) and len(v) > _SAMPLE_VAL_MAX else v)
              for k, v in row.items()}
@@ -531,7 +530,7 @@ def build_llm_prompt(user_query, table_schema, summary, history, rows=None, head
 
     summary_line = f"Summary: {summary}\n" if summary else ""
 
-    return (
+    system_content = (
         "Friendly data analyst in a CSV app. Reply ONLY with JSON (no markdown):\n"
         '{"answer_template":"...","sql":...,"updated_summary":"..."}\n\n'
         "RULES\n"
@@ -548,9 +547,13 @@ def build_llm_prompt(user_query, table_schema, summary, history, rows=None, head
         f"Schema: {table_schema}\n"
         f"{summary_line}"
         f"{sample_section}"
-        f"History:\n{formatted_history}"
-        f"USER: {user_query}\n"
     )
+
+    messages = [{"role": "system", "content": system_content}]
+    for turn in history[-_HISTORY_TURNS:]:
+        messages.append({"role": turn["role"], "content": turn["content"]})
+    messages.append({"role": "user", "content": user_query})
+    return messages
 
 
 @app.post("/api/ask")
@@ -586,11 +589,11 @@ def ask():
 
     try:
         client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
-        prompt = build_llm_prompt(question, schema, summary, history, rows, headers)
+        messages = build_llm_messages(question, schema, summary, history, rows, headers)
         completion = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             max_tokens=512,
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             temperature=0.1,
         )
         raw = completion.choices[0].message.content.strip()
