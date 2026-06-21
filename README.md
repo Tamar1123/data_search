@@ -34,7 +34,8 @@ A full-stack web application for exploring CSV datasets. Upload a file, build ne
 │           ├── Table.jsx     → upload, filter, pagination, chat UI
 │           └── DatasetList.jsx → saved dataset browser
 └── server/
-    ├── server.py             → Flask API (all routes + OpenAPI spec)
+    ├── server.py             → Flask API (all routes)
+    ├── openapi.py            → OpenAPI 3.0 spec and Swagger UI routes
     ├── Procfile              → gunicorn start command for Railway
     ├── requirements.txt      → Python dependencies
     ├── .env.example          → backend env var template
