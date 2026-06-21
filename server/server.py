@@ -15,7 +15,13 @@ load_dotenv()
 
 app = Flask(__name__)
 # JWT secret must be overridden via environment variable in production
-app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "dev-secret-change-in-production")
+_jwt_secret = os.getenv("JWT_SECRET_KEY")
+if not _jwt_secret:
+    import sys
+    if os.getenv("FLASK_ENV") == "production":
+        sys.exit("FATAL: JWT_SECRET_KEY env var is required in production")
+    _jwt_secret = "dev-secret-change-in-production"
+app.config["JWT_SECRET_KEY"] = _jwt_secret
 JWTManager(app)
 
 _SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,7 +58,7 @@ def get_db():
 
 
 @app.teardown_appcontext
-def close_db(exc):
+def close_db(_exc):
     db = g.pop("db", None)
     if db is not None:
         db.close()
@@ -191,7 +197,7 @@ def get_dataset(dataset_id):
 @jwt_required()
 def delete_dataset(dataset_id):
     db = get_db()
-    db.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
+    db.execute("DELETE FROM datasets WHERE id = ? AND username = ?", (dataset_id, get_jwt_identity()))
     db.commit()
     return "", 204
 
@@ -214,6 +220,8 @@ def upload_csv():
 
     if not content.strip():
         return jsonify({"error": "CSV content is empty"}), 400
+    if len(content) > 10_000_000:
+        return jsonify({"error": "File too large (max 10 MB)"}), 400
 
     reader = csv.DictReader(io.StringIO(content))
     col_names = reader.fieldnames or []
@@ -594,7 +602,7 @@ def ask():
         client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
         messages = build_llm_messages(question, schema, summary, history, rows, headers)
         completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
             max_tokens=512,
             messages=messages,
             temperature=0.1,
@@ -667,4 +675,4 @@ app.register_blueprint(docs_bp)
 init_db()
 
 if __name__ == "__main__":
-    app.run(port=int(os.getenv("PORT", 5000)), debug=True)
+    app.run(port=int(os.getenv("PORT", 5000)), debug=os.getenv("FLASK_ENV") != "production")

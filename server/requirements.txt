@@ -1,7 +1,6 @@
 flask>=3.0
 flask-jwt-extended>=4.0
 openai>=1.0
-sqlalchemy>=2.0
 python-dotenv>=1.0
 werkzeug>=3.0
 gunicorn>=21.0
