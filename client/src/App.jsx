@@ -6,12 +6,13 @@ import DatasetList from './components/DatasetList'
 
 function App() {
   const [user, setUser] = useState(null)
+  // tableKey is incremented whenever we want to fully reset the Table component
   const [tableKey, setTableKey] = useState(0)
-  const [tableData, setTableData] = useState({ name: '', headers: [], content: [], context: null, readOnly: false, id: null })
+  const [tableData, setTableData] = useState({ name: '', headers: [], content: [], readOnly: false, id: null })
   const [refreshKey, setRefreshKey] = useState(0)
   const [showDatasets, setShowDatasets] = useState(false)
 
-  const emptyTable = { name: '', headers: [], content: [], context: null, readOnly: false, id: null }
+  const emptyTable = { name: '', headers: [], content: [], readOnly: false, id: null }
 
   function handleAuth(newUser) {
     setUser(newUser)
@@ -22,6 +23,7 @@ function App() {
   }
 
   async function handleSave({ name, headers, rows }) {
+    // The server upserts by (username, name) and manages context/summary server-side
     await fetch('/api/datasets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${user.token}` },
@@ -31,7 +33,8 @@ function App() {
   }
 
   function handleLoad(dataset) {
-    setTableData({ name: dataset.name, headers: dataset.headers, content: dataset.rows, context: dataset.context ?? null, readOnly: true, id: dataset.id })
+    // datasetId is passed to Table so it can fetch rows/columns directly from the server
+    setTableData({ name: dataset.name, headers: dataset.headers, content: dataset.rows, readOnly: true, id: dataset.id })
     setTableKey(k => k + 1)
     setShowDatasets(false)
   }
@@ -79,7 +82,6 @@ function App() {
             name={tableData.name}
             headers={tableData.headers}
             content={tableData.content}
-            initialContext={tableData.context}
             onSave={user.isGuest ? null : handleSave}
             readOnly={tableData.readOnly}
             datasetId={tableData.id}

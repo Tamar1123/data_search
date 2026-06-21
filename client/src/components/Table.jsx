@@ -1,25 +1,51 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { Fragment, useState, useRef, useEffect, useCallback } from 'react'
 import './Table.css'
 
 const PAGE_SIZE = 50
 
+const NO_VALUE_OPS = new Set(['is_true', 'is_false', 'is_empty', 'not_empty'])
+
 const OPERATORS = {
-  string:  [{ label: 'contains',     op: 'contains'    },
-            { label: 'equals',       op: 'equals'      },
-            { label: 'starts with',  op: 'starts_with' }],
-  limited: [{ label: 'equals',       op: 'equals'      }],
-  number:  [{ label: '=',            op: 'eq'          },
-            { label: '>',            op: 'gt'          },
-            { label: '<',            op: 'lt'          },
-            { label: '≥',            op: 'gte'         },
-            { label: '≤',            op: 'lte'         }],
-  date:    [{ label: 'equals',       op: 'eq'          },
-            { label: 'before',       op: 'lt'          },
-            { label: 'after',        op: 'gt'          },
-            { label: 'on or before', op: 'lte'         },
-            { label: 'on or after',  op: 'gte'         }],
-  boolean: [{ label: 'is true',      op: 'is_true'     },
-            { label: 'is false',     op: 'is_false'    }],
+  string: [
+    { label: 'contains',          op: 'contains'        },
+    { label: 'not contains',      op: 'not_contains'    },
+    { label: 'equals',            op: 'equals'          },
+    { label: 'not equals',        op: 'not_equals'      },
+    { label: 'starts with',       op: 'starts_with'     },
+    { label: 'not starts with',   op: 'not_starts_with' },
+    { label: 'is empty',          op: 'is_empty'        },
+    { label: 'is not empty',      op: 'not_empty'       },
+  ],
+  limited: [
+    { label: 'equals',            op: 'equals'          },
+    { label: 'not equals',        op: 'not_equals'      },
+    { label: 'is empty',          op: 'is_empty'        },
+    { label: 'is not empty',      op: 'not_empty'       },
+  ],
+  number: [
+    { label: '=',            op: 'eq'        },
+    { label: '≠',            op: 'neq'       },
+    { label: '>',            op: 'gt'        },
+    { label: '<',            op: 'lt'        },
+    { label: '≥',            op: 'gte'       },
+    { label: '≤',            op: 'lte'       },
+    { label: 'is empty',     op: 'is_empty'  },
+    { label: 'is not empty', op: 'not_empty' },
+  ],
+  date: [
+    { label: 'equals',       op: 'eq'        },
+    { label: 'not equals',   op: 'neq'       },
+    { label: 'before',       op: 'lt'        },
+    { label: 'after',        op: 'gt'        },
+    { label: 'on or before', op: 'lte'       },
+    { label: 'on or after',  op: 'gte'       },
+    { label: 'is empty',     op: 'is_empty'  },
+    { label: 'is not empty', op: 'not_empty' },
+  ],
+  boolean: [
+    { label: 'is true',  op: 'is_true'  },
+    { label: 'is false', op: 'is_false' },
+  ],
 }
 
 const DEFAULT_OP = {
@@ -30,36 +56,63 @@ function FilterRow({ filter, colMeta, onUpdate, onRemove }) {
   const col = colMeta.find(c => c.name === filter.col)
   const colType = col?.type ?? 'string'
   const operators = OPERATORS[colType] ?? OPERATORS.string
-  const showValue = colType !== 'boolean'
+  const showValue = !NO_VALUE_OPS.has(filter.op)
 
   function handleColChange(e) {
     const newCol = e.target.value
     const newType = colMeta.find(c => c.name === newCol)?.type ?? 'string'
-    onUpdate(filter.id, { col: newCol, op: DEFAULT_OP[newType], val: '' })
+    onUpdate({ col: newCol, op: DEFAULT_OP[newType], val: '' })
   }
 
   return (
-    <div className="table-filter-row">
-      <select value={filter.col} onChange={handleColChange}>
+    <span className="table-filter-row">
+      <select className="fcol" value={filter.col} onChange={handleColChange}>
         {colMeta.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
       </select>
-      <select value={filter.op} onChange={e => onUpdate(filter.id, { op: e.target.value, val: '' })}>
+      <select className="fop" value={filter.op} onChange={e => onUpdate({ op: e.target.value, val: '' })}>
         {operators.map(({ label, op }) => <option key={op} value={op}>{label}</option>)}
       </select>
       {showValue && (
         colType === 'limited' && col?.options
-          ? <select value={filter.val} onChange={e => onUpdate(filter.id, { val: e.target.value })}>
-              <option value="">— any —</option>
+          ? <select className="fval" value={filter.val} onChange={e => onUpdate({ val: e.target.value })}>
+              <option value="">any</option>
               {col.options.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
           : <input
+              className="fval"
               type={colType === 'number' ? 'number' : colType === 'date' ? 'date' : 'text'}
               value={filter.val}
               placeholder="value"
-              onChange={e => onUpdate(filter.id, { val: e.target.value })}
+              onChange={e => onUpdate({ val: e.target.value })}
             />
       )}
-      <button className="table-btn table-btn-remove" onClick={() => onRemove(filter.id)}>×</button>
+      <button className="table-btn table-btn-remove" onClick={onRemove}>×</button>
+    </span>
+  )
+}
+
+function LogicToggle({ value, onChange }) {
+  return (
+    <span className="table-logic-toggle">
+      <button className={`table-logic-btn${value === 'AND' ? ' active' : ''}`} onClick={() => onChange('AND')}>AND</button>
+      <button className={`table-logic-btn${value === 'OR' ? ' active' : ''}`} onClick={() => onChange('OR')}>OR</button>
+    </span>
+  )
+}
+
+function FilterGroup({ group, colMeta, onUpdateLogic, onAddFilter, onUpdateFilter, onRemoveFilter, onRemove }) {
+  return (
+    <div className="table-filter-group">
+      {group.filters.length >= 2 && <LogicToggle value={group.logic} onChange={onUpdateLogic} />}
+      <span className="table-filter-group-filters">
+        {group.filters.map(f => (
+          <FilterRow key={f.id} filter={f} colMeta={colMeta}
+            onUpdate={patch => onUpdateFilter(f.id, patch)}
+            onRemove={() => onRemoveFilter(f.id)} />
+        ))}
+        <button className="table-btn table-btn-icon" onClick={onAddFilter} disabled={!colMeta.length} title="Add filter">+</button>
+      </span>
+      <button className="table-btn table-btn-remove" onClick={onRemove} title="Remove group">×</button>
     </div>
   )
 }
@@ -69,7 +122,6 @@ export default function Table({
   headers = [],
   content = [],
   onSave = null,
-  initialContext = null,
   readOnly = false,
   datasetId = null,
   onOpenDatasets = null,
@@ -83,8 +135,9 @@ export default function Table({
   const [pages, setPages] = useState(1)
   const [tableName, setTableName] = useState(name)
   const [searchText, setSearchText] = useState('')
-  const [filters, setFilters] = useState([])
-  const [nextFilterId, setNextFilterId] = useState(0)
+  const [filterTree, setFilterTree] = useState({ logic: 'AND', groups: [] })
+  const [appliedFiltersJson, setAppliedFiltersJson] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
   const [fileError, setFileError] = useState('')
   const [uploading, setUploading] = useState(false)
   const [showTextInput, setShowTextInput] = useState(false)
@@ -93,17 +146,15 @@ export default function Table({
   const [chatHistory, setChatHistory] = useState([])
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
+  const [showChat, setShowChat] = useState(true)
 
+  const nextIdRef = useRef(0)
   const fileInputRef = useRef(null)
   const chatEndRef = useRef(null)
   const chatInputRef = useRef(null)
   const fetchAbortRef = useRef(null)
 
-  // Only active filters are sent to the server
-  const filtersJson = useMemo(() => {
-    const active = filters.filter(f => f.val !== '' || f.op === 'is_true' || f.op === 'is_false')
-    return active.length ? JSON.stringify(active.map(({ col, op, val }) => ({ col, op, val }))) : ''
-  }, [filters])
+  function getNextId() { return nextIdRef.current++ }
 
   const fetchRows = useCallback(async (dsId, pg, search, fJson) => {
     if (!dsId) return
@@ -129,10 +180,9 @@ export default function Table({
   }, [])
 
   useEffect(() => {
-    fetchRows(currentDatasetId, page, searchText, filtersJson)
-  }, [currentDatasetId, page, searchText, filtersJson, fetchRows])
+    fetchRows(currentDatasetId, page, searchText, appliedFiltersJson)
+  }, [currentDatasetId, page, searchText, appliedFiltersJson, fetchRows])
 
-  // Fetch column type metadata whenever the dataset changes
   useEffect(() => {
     if (!currentDatasetId) { setColMeta([]); return }
     fetch(`/api/columns?dataset_id=${currentDatasetId}`)
@@ -166,8 +216,9 @@ export default function Table({
       setTableName(data.name)
       setPage(1)
       setSearchText('')
-      setFilters([])
-      setNextFilterId(0)
+      setFilterTree({ logic: 'AND', groups: [] })
+      setAppliedFiltersJson('')
+      setShowFilters(false)
       setSaved(false)
       setChatHistory([])
     } catch (err) {
@@ -245,33 +296,94 @@ export default function Table({
     setPages(1)
     setTableName('')
     setSearchText('')
-    setFilters([])
-    setNextFilterId(0)
+    setFilterTree({ logic: 'AND', groups: [] })
+    setAppliedFiltersJson('')
+    setShowFilters(false)
     setFileError('')
     setSaved(false)
     setChatHistory([])
     setChatInput('')
   }
 
-  function addFilter() {
+  function addGroup() {
+    const groupId = getNextId()
+    setFilterTree(prev => ({
+      ...prev,
+      groups: [...prev.groups, { id: groupId, logic: 'AND', filters: [] }],
+    }))
+  }
+
+  function addFilterToGroup(groupId) {
     if (colMeta.length === 0) return
     const first = colMeta[0]
-    setFilters(prev => [...prev, { id: nextFilterId, col: first.name, op: DEFAULT_OP[first.type], val: '' }])
-    setNextFilterId(n => n + 1)
+    const filterId = getNextId()
+    setFilterTree(prev => ({
+      ...prev,
+      groups: prev.groups.map(g =>
+        g.id !== groupId ? g : {
+          ...g,
+          filters: [...g.filters, { id: filterId, col: first.name, op: DEFAULT_OP[first.type], val: '' }],
+        }
+      ),
+    }))
+  }
+
+  function updateFilterInGroup(groupId, filterId, patch) {
+    setFilterTree(prev => ({
+      ...prev,
+      groups: prev.groups.map(g =>
+        g.id !== groupId ? g : {
+          ...g,
+          filters: g.filters.map(f => f.id !== filterId ? f : { ...f, ...patch }),
+        }
+      ),
+    }))
+  }
+
+  function removeFilterFromGroup(groupId, filterId) {
+    setFilterTree(prev => ({
+      ...prev,
+      groups: prev.groups.map(g =>
+        g.id !== groupId ? g : { ...g, filters: g.filters.filter(f => f.id !== filterId) }
+      ),
+    }))
+  }
+
+  function removeGroup(groupId) {
+    setFilterTree(prev => ({ ...prev, groups: prev.groups.filter(g => g.id !== groupId) }))
+  }
+
+  function setGroupLogic(groupId, logic) {
+    setFilterTree(prev => ({
+      ...prev,
+      groups: prev.groups.map(g => g.id !== groupId ? g : { ...g, logic }),
+    }))
+  }
+
+  function setTopLogic(logic) {
+    setFilterTree(prev => ({ ...prev, logic }))
+  }
+
+  function applyFilters() {
+    const hasActive = filterTree.groups.some(g =>
+      g.filters.some(f => f.val !== '' || NO_VALUE_OPS.has(f.op))
+    )
+    setAppliedFiltersJson(hasActive ? JSON.stringify(filterTree) : '')
     setPage(1)
   }
 
-  function updateFilter(id, patch) {
-    setFilters(prev => prev.map(f => f.id !== id ? f : { ...f, ...patch }))
-    setPage(1)
-  }
-
-  function removeFilter(id) {
-    setFilters(prev => prev.filter(f => f.id !== id))
+  function resetFilters() {
+    setFilterTree({ logic: 'AND', groups: [] })
+    setAppliedFiltersJson('')
     setPage(1)
   }
 
   const hasData = currentDatasetId !== null && columns.length > 0
+  const hasPendingGroups = filterTree.groups.length > 0
+  const filtersApplied = appliedFiltersJson !== ''
+  const activeFilterCount = filterTree.groups.reduce((n, g) =>
+    n + g.filters.filter(f => f.val !== '' || NO_VALUE_OPS.has(f.op)).length, 0
+  )
 
   return (
     <section className="table-root">
@@ -323,28 +435,29 @@ export default function Table({
         </div>
       ) : (
         <>
-          {readOnly
-            ? <p className="table-name-display">{tableName}</p>
-            : <input
-                className="table-name-input"
-                type="text"
-                value={tableName}
-                onChange={e => setTableName(e.target.value)}
-                placeholder="Table name"
-              />
-          }
-
-          {!readOnly && (
-            <div className="table-file-loader">
-              {onSave && !saved && (
-                <button className="table-btn" onClick={handleSave}>Save</button>
-              )}
-              <button className="table-btn table-btn-danger" onClick={clearTable}>
-                {saved ? 'Upload new dataset' : 'Clear'}
-              </button>
-              {fileError && <span className="table-error">{fileError}</span>}
-            </div>
-          )}
+          <div className="table-title-row">
+            {readOnly
+              ? <p className="table-name-display">{tableName}</p>
+              : <input
+                  className="table-name-input"
+                  type="text"
+                  value={tableName}
+                  onChange={e => setTableName(e.target.value)}
+                  placeholder="Table name"
+                />
+            }
+            {!readOnly && (
+              <>
+                {onSave && !saved && (
+                  <button className="table-btn" onClick={handleSave}>Save</button>
+                )}
+                <button className="table-btn table-btn-danger" onClick={clearTable}>
+                  {saved ? 'Upload new dataset' : 'Clear'}
+                </button>
+                {fileError && <span className="table-error">{fileError}</span>}
+              </>
+            )}
+          </div>
 
           <div className="table-search">
             <input
@@ -357,19 +470,74 @@ export default function Table({
 
           <div className="table-body-row">
             <div className="table-col">
-              <div className="table-filters">
-                {filters.map(f => (
-                  <FilterRow key={f.id} filter={f} colMeta={colMeta} onUpdate={updateFilter} onRemove={removeFilter} />
-                ))}
-                <button className="table-btn table-add-filter" onClick={addFilter} disabled={colMeta.length === 0}>
-                  + Add filter
+              {/* Always-visible filter bar */}
+              <div className="table-filter-bar">
+                <button
+                  className={`table-btn table-filter-toggle${showFilters ? ' active' : ''}`}
+                  onClick={() => {
+                    setShowFilters(v => {
+                      if (!v && filterTree.groups.length === 0) {
+                        setFilterTree(prev => ({
+                          ...prev,
+                          groups: [{ id: getNextId(), logic: 'AND', filters: [] }],
+                        }))
+                      }
+                      return !v
+                    })
+                  }}
+                  disabled={colMeta.length === 0}
+                >
+                  {showFilters ? '▾' : '▸'} Filters
+                  {activeFilterCount > 0 && <span className="table-filter-badge">{activeFilterCount}</span>}
                 </button>
-                {filters.length > 0 && (
-                  <button className="table-btn" onClick={() => { setFilters([]); setPage(1) }}>
-                    Reset filters
+                {showFilters && (
+                  <>
+                    <button className="table-btn table-btn-icon table-add-filter" onClick={addGroup} disabled={!colMeta.length} title="Add filter group">+ group</button>
+                    {hasPendingGroups && (
+                      <>
+                        <button className="table-btn table-btn-apply" onClick={applyFilters}>Apply</button>
+                        <button className="table-btn" onClick={resetFilters}>Reset</button>
+                      </>
+                    )}
+                    {!hasPendingGroups && filtersApplied && (
+                      <button className="table-btn" onClick={resetFilters}>Clear</button>
+                    )}
+                  </>
+                )}
+                {!showFilters && filtersApplied && (
+                  <span className="table-filter-active-note">{activeFilterCount} active</span>
+                )}
+                {!showChat && (
+                  <button className="table-btn" style={{ marginLeft: 'auto' }} onClick={() => setShowChat(true)}>
+                    Show chat
                   </button>
                 )}
               </div>
+
+              {/* Collapsible filter panel */}
+              {showFilters && (
+                <div className="table-filters">
+                  {filterTree.groups.map((group, gi) => (
+                    <Fragment key={group.id}>
+                      {gi > 0 && (
+                        <div className="table-filter-group-connector">
+                          <LogicToggle value={filterTree.logic} onChange={setTopLogic} />
+                        </div>
+                      )}
+                      <FilterGroup
+                        group={group}
+                        colMeta={colMeta}
+                        onUpdateLogic={logic => setGroupLogic(group.id, logic)}
+                        onAddFilter={() => addFilterToGroup(group.id)}
+                        onUpdateFilter={(fid, patch) => updateFilterInGroup(group.id, fid, patch)}
+                        onRemoveFilter={fid => removeFilterFromGroup(group.id, fid)}
+                        onRemove={() => removeGroup(group.id)}
+                      />
+                    </Fragment>
+                  ))}
+                </div>
+              )}
+
               <div className="table-scroll-wrapper">
                 <table className="table-grid">
                   <thead>
@@ -410,8 +578,11 @@ export default function Table({
               </div>
             </div>
 
-            <div className="table-chat">
-              <h3 className="table-chat-title">Ask about this dataset</h3>
+            {showChat && <div className="table-chat">
+              <h3 className="table-chat-title">
+                Ask about this dataset
+                <button className="table-chat-close" onClick={() => setShowChat(false)}>×</button>
+              </h3>
               <div className="table-chat-messages">
                 {chatHistory.map((msg, i) => (
                   <div key={i} className={`table-chat-msg table-chat-msg-${msg.role}`}>
@@ -441,7 +612,7 @@ export default function Table({
                   Send
                 </button>
               </div>
-            </div>
+            </div>}
           </div>
         </>
       )}

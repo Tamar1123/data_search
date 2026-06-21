@@ -64,7 +64,7 @@ export default function Auth({ onAuth }) {
   return (
     <div className="auth-backdrop">
       <div className="auth-card">
-        <h1 className="auth-title">Table Viewer</h1>
+        <h1 className="auth-title">DataSearch</h1>
 
         <div className="auth-tabs">
           <button
