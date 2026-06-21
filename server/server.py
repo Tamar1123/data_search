@@ -25,6 +25,7 @@ app.config["JWT_SECRET_KEY"] = _jwt_secret
 JWTManager(app)
 
 _SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
+
 DB_PATH = os.getenv("DB_PATH", os.path.join(_SERVER_DIR, "data", "data.db"))
 try:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -33,6 +34,7 @@ except OSError:
 
 
 _ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "*")
+
 
 
 @app.after_request
@@ -99,6 +101,9 @@ def init_db():
         except Exception:
             pass
         db.commit()
+
+
+init_db()
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
