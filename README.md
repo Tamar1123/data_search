@@ -281,5 +281,7 @@ npm run build
 
 - **LLM questions scoped to the active filter** — Today the LLM always sees all rows. When a user has applied filters and narrowed to a subset, questions like "what's the average age?" should run against that filtered view, not the whole dataset. This means forwarding the active filter tree to the `/api/ask` endpoint and applying it before building the in-memory SQLite table the LLM queries.
 
+- **True DB-level filtering** — Currently each request loads the full JSON row blob from SQLite into memory and runs filters in an in-memory SQLite table. The proper fix is to introduce a `dataset_rows` table (`dataset_id`, `row_index`, `data TEXT`) that stores one row per CSV row as a JSON object, then filter with SQLite's `json_extract` directly against the file-backed database. This eliminates the full-dataset load on every request and opens the door to indexing.
+
 - **Collaborative datasets** — Allow users to share a dataset with teammates by link or by adding collaborators. A shared dataset could support concurrent annotations — each user marking rows with a label or note — backed by a simple `annotations` table keyed by `(dataset_id, row_index, username)`. This turns the tool from a personal explorer into a lightweight data-labeling workspace.
 

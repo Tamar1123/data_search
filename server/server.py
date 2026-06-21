@@ -20,7 +20,10 @@ JWTManager(app)
 
 _SERVER_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.getenv("DB_PATH", os.path.join(_SERVER_DIR, "data", "data.db"))
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+try:
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+except OSError:
+    pass
 
 
 _ALLOWED_ORIGIN = os.getenv("ALLOWED_ORIGIN", "*")
@@ -289,82 +292,117 @@ def get_column_meta():
 
 # ── Row retrieval ─────────────────────────────────────────────────────────────
 
-def _apply_filter(value, op, filter_val):
-    # Returns True if `value` satisfies the filter condition.
-    # Numeric and date comparisons fall back to False when parsing fails.
-    v = str(value or "").strip()
-    fv = filter_val.strip()
-    if op == "contains":
-        return fv.lower() in v.lower()
-    if op == "not_contains":
-        return fv.lower() not in v.lower()
-    if op in ("equals", "eq"):
-        return v.lower() == fv.lower()
-    if op in ("not_equals", "neq"):
-        return v.lower() != fv.lower()
-    if op == "starts_with":
-        return v.lower().startswith(fv.lower())
-    if op == "not_starts_with":
-        return not v.lower().startswith(fv.lower())
-    if op == "is_empty":
-        return v == ""
-    if op == "not_empty":
-        return v != ""
-    if op == "is_true":
-        return v.lower() == "true"
-    if op == "is_false":
-        return v.lower() != "true"
-    if op in ("gt", "gte", "lt", "lte"):
-        # Try numeric comparison first, then date comparison
-        try:
-            n, fn = float(v), float(fv)
-            return {"gt": n > fn, "gte": n >= fn, "lt": n < fn, "lte": n <= fn}[op]
-        except ValueError:
-            pass
-        try:
-            from datetime import datetime as _dt
-            d, fd = _dt.strptime(v, "%Y-%m-%d"), _dt.strptime(fv, "%Y-%m-%d")
-            return {"gt": d > fd, "gte": d >= fd, "lt": d < fd, "lte": d <= fd}[op]
-        except ValueError:
-            pass
-        return False
-    return True
-
-
 def _filter_is_active(f):
     return f.get("val", "") != "" or f.get("op") in ("is_true", "is_false", "is_empty", "not_empty")
 
 
-def _apply_filter_tree(rows, tree):
-    # Evaluates a nested filter tree: groups connected by a top-level AND/OR,
-    # each group containing filters connected by the group's own AND/OR logic.
-    if not tree or not tree.get("groups"):
-        return rows
+def _filter_to_sql(f, col_map, params):
+    """Translates one filter condition to a SQL fragment, appending bind params."""
+    orig_col = f.get("col", "")
+    sql_col = col_map.get(orig_col, orig_col)
+    q = f'"{sql_col.replace(chr(34), chr(34) * 2)}"'  # double-quote and escape
+    op = f.get("op", "")
+    val = f.get("val", "")
 
+    if op == "contains":
+        params.append(f"%{val}%")
+        return f"LOWER({q}) LIKE LOWER(?)"
+    if op == "not_contains":
+        params.append(f"%{val}%")
+        return f"LOWER({q}) NOT LIKE LOWER(?)"
+    if op in ("equals", "eq"):
+        params.append(val)
+        return f"LOWER({q}) = LOWER(?)"
+    if op in ("not_equals", "neq"):
+        params.append(val)
+        return f"LOWER({q}) != LOWER(?)"
+    if op == "starts_with":
+        params.append(f"{val}%")
+        return f"LOWER({q}) LIKE LOWER(?)"
+    if op == "not_starts_with":
+        params.append(f"{val}%")
+        return f"LOWER({q}) NOT LIKE LOWER(?)"
+    if op == "is_empty":
+        return f"{q} = ''"
+    if op == "not_empty":
+        return f"{q} != ''"
+    if op == "is_true":
+        return f"LOWER({q}) = 'true'"
+    if op == "is_false":
+        return f"LOWER({q}) != 'true'"
+    if op in ("gt", "gte", "lt", "lte"):
+        params.append(val)
+        sql_op = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}[op]
+        return f"CAST({q} AS REAL) {sql_op} CAST(? AS REAL)"
+    return "1=1"
+
+
+def _filter_tree_to_sql(tree, col_map, params):
+    """Converts the nested filter tree into a SQL WHERE fragment."""
     groups = tree.get("groups", [])
     top_logic = tree.get("logic", "AND").upper()
+    group_clauses = []
+    for group in groups:
+        active = [f for f in group.get("filters", []) if _filter_is_active(f) and f.get("col")]
+        if not active:
+            continue
+        conds = [_filter_to_sql(f, col_map, params) for f in active]
+        group_logic = group.get("logic", "AND").upper()
+        joined = f" {group_logic} ".join(conds)
+        group_clauses.append(f"({joined})" if len(conds) > 1 else joined)
+    if not group_clauses:
+        return ""
+    return f" {top_logic} ".join(group_clauses)
 
-    def row_passes(row):
-        group_results = []
-        for group in groups:
-            group_logic = group.get("logic", "AND").upper()
-            active = [f for f in group.get("filters", []) if _filter_is_active(f) and f.get("col")]
-            if not active:
-                group_results.append(True)
-                continue
-            results = [_apply_filter(row.get(f["col"], ""), f.get("op", ""), f.get("val", "")) for f in active]
-            group_results.append(any(results) if group_logic == "OR" else all(results))
 
-        if not group_results:
-            return True
-        return any(group_results) if top_logic == "OR" else all(group_results)
+def _query_rows(rows, headers, search, filters_raw, page, page_size):
+    """Loads rows into an in-memory SQLite table and applies search, filters, and pagination via SQL."""
+    mapping = _sanitize_headers(headers)
+    if not mapping:
+        return [], [], 0
 
-    return [r for r in rows if row_passes(r)]
+    col_map = {orig: sql for sql, orig in mapping}  # original name → sqlite column name
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        col_defs = ", ".join(f'"{sql}" TEXT' for sql, _ in mapping)
+        conn.execute(f"CREATE TABLE data ({col_defs})")
+        placeholders = ", ".join("?" for _ in mapping)
+        conn.executemany(
+            f"INSERT INTO data VALUES ({placeholders})",
+            [[str(row.get(orig, "") or "") for _, orig in mapping] for row in rows],
+        )
+
+        where_parts = []
+        params = []
+
+        if search:
+            clauses = [f'LOWER("{sql}") LIKE ?' for sql, _ in mapping]
+            params.extend([f"%{search.lower()}%"] * len(mapping))
+            where_parts.append(f"({' OR '.join(clauses)})")
+
+        if filters_raw:
+            try:
+                tree_sql = _filter_tree_to_sql(json.loads(filters_raw), col_map, params)
+                if tree_sql:
+                    where_parts.append(f"({tree_sql})")
+            except (json.JSONDecodeError, AttributeError):
+                pass
+
+        where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+
+        total = conn.execute(f"SELECT COUNT(*) FROM data {where}", params).fetchone()[0]
+        offset = (page - 1) * page_size
+        cursor = conn.execute(f"SELECT * FROM data {where} LIMIT ? OFFSET ?", params + [page_size, offset])
+        col_names = [d[0] for d in cursor.description]
+        page_rows = [dict(zip(col_names, row)) for row in cursor.fetchall()]
+        return page_rows, col_names, total
+    finally:
+        conn.close()
 
 
 @app.get("/api/rows")
 def get_rows():
-    # Returns a paginated, optionally searched and filtered slice of a dataset's rows.
     dataset_id = request.args.get("dataset_id", type=int)
     if not dataset_id:
         return jsonify({"error": "dataset_id is required"}), 400
@@ -377,27 +415,15 @@ def get_rows():
 
     rows = json.loads(row_data["rows"])
     headers = json.loads(row_data["headers"])
-    col_names = [h[0] for h in headers]
-
-    # Global search: keep rows where any column value contains the search string
-    search = request.args.get("search", "").strip().lower()
-    if search:
-        rows = [r for r in rows if any(search in str(v).lower() for v in r.values())]
-
-    # Nested filter tree: {logic, groups: [{logic, filters: [{col, op, val}]}]}
+    search = request.args.get("search", "").strip()
     filters_raw = request.args.get("filters", "")
-    if filters_raw:
-        try:
-            rows = _apply_filter_tree(rows, json.loads(filters_raw))
-        except (json.JSONDecodeError, AttributeError):
-            pass
-
-    total = len(rows)
     page = max(1, request.args.get("page", 1, type=int))
     page_size = min(500, max(1, request.args.get("page_size", 50, type=int)))
-    start = (page - 1) * page_size
+
+    page_rows, col_names, total = _query_rows(rows, headers, search, filters_raw, page, page_size)
+
     return jsonify({
-        "rows": rows[start:start + page_size],
+        "rows": page_rows,
         "columns": col_names,
         "total": total,
         "page": page,
